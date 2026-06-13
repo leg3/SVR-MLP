@@ -88,3 +88,30 @@ test_y_scaled  <- (test_df$y  - scaler_mu) / scaler_sd
 # Overwrite y for downstream modeling (all modeling uses scaled y)
 train_df$y <- train_y_scaled
 test_df$y  <- test_y_scaled
+
+# make_supervised()
+# Given a univariate series, build:
+#   X : matrix of lagged windows (rows = forecast origins; cols = lagged values)
+#   y : vector of targets at the specified forecast horizon
+#
+# Window ordering: oldest -> newest within the lag window
+make_supervised <- function(series_values,
+                            lag_window,
+                            forecast_horizon) {
+  n_observations <- length(series_values)
+
+  # Forecast origin indices (t) that allow a full lag window and a future target
+  forecast_origins <- lag_window:(n_observations - forecast_horizon)
+
+  # Construct 2D design matrix
+  X_mat <- t(sapply(forecast_origins, function(t_index) {
+    series_values[(t_index - lag_window + 1):t_index]
+  }))
+
+  # Construct target vector at t + h
+  y_vec <- sapply(forecast_origins, function(t_index) {
+    series_values[t_index + forecast_horizon]
+  })
+
+  list(X = as.matrix(X_mat), y = as.numeric(y_vec))
+}
