@@ -320,3 +320,17 @@ for (lag_window in lag_grid) {
     )
   }
 }
+
+# Bind per-run lists into long tables
+results_mlp <- bind_rows(results_mlp_list)
+preds_mlp   <- bind_rows(preds_mlp_list)
+
+# Rank models by horizon then test MAE on the raw log(SVR) scale
+metrics_mlp_result <- results_mlp %>%
+  arrange(horizon, test_mae_raw)
+
+# CSV Export
+write_csv(metrics_mlp_result, "MLP Metrics Latest.csv")
+
+# Print metrics table
+metrics_mlp_result
