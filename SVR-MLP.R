@@ -115,3 +115,50 @@ make_supervised <- function(series_values,
 
   list(X = as.matrix(X_mat), y = as.numeric(y_vec))
 }
+
+# make_pred_tbl()
+# Run model predictions for a supervised split and align predictions to dates.
+# Optionally inverse-transform y and y_hat back to the original log(SVR) scale.
+make_pred_tbl <- function(model,
+                          sup,
+                          y_vec,
+                          split_dates,
+                          lag_window,
+                          h,
+                          which_split = c("val", "test"),
+                          scaler_mu = NULL,
+                          scaler_sd = NULL) {
+  which_split <- match.arg(which_split)
+
+  # Predict and compute residuals (on the scaled modeling scale)
+  y_hat <- as.numeric(model %>% predict(sup$X))
+  y_vec <- as.numeric(y_vec)
+  resid <- y_vec - y_hat
+
+  # Align prediction targets to the correct monthly dates
+  n_split <- length(split_dates)
+  target_idx <- (lag_window:(n_split - h)) + h
+  dates <- split_dates[target_idx]
+
+  out <- tibble(
+    date = dates,
+    y = y_vec,
+    y_hat = y_hat,
+    resid = resid,
+    lag_window = lag_window,
+    horizon = h,
+    split = which_split
+  )
+
+  # If scaler parameters are supplied, invert y and y_hat back to log(SVR)
+  if (!is.null(scaler_mu) && !is.null(scaler_sd)) {
+    out <- out %>%
+      mutate(
+        y_raw     = y * scaler_sd + scaler_mu,
+        y_hat_raw = y_hat * scaler_sd + scaler_mu,
+        resid_raw = y_raw - y_hat_raw
+      )
+  }
+
+  return(out)
+}
