@@ -162,3 +162,34 @@ make_pred_tbl <- function(model,
 
   return(out)
 }
+
+# Keras-side reproducibility (separate from set.seed)
+set_random_seed(599)
+
+# Lag windows to evaluate (number of months used as inputs)
+lag_grid <- c(24, 18, 15, 12, 9, 6, 3)
+
+# # Collectors:
+# #   - results_mlp_list     : per-run metric rows (one row per lag_window × h)
+# #   - preds_mlp_val_list   : per-run prediction tables for validation split
+# #   - preds_mlp_list       : per-run prediction tables for test split
+# results_mlp_list    <- list()
+# preds_mlp_val_list  <- list()
+# preds_mlp_list      <- list()
+
+# Collectors:
+#   - results_mlp_list : per-run metric rows (one row per lag_window × h)
+#   - preds_mlp_list   : per-run prediction tables for test split
+results_mlp_list <- list()
+preds_mlp_list   <- list()
+
+# Forecast horizons (steps ahead)
+horizons <- c(1, 3)
+
+# Counter for list indexing across the full grid
+i <- 0
+
+# Training controls
+patience         <- 20
+epoch            <- 300
+validation_split <- 0.20
