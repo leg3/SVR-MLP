@@ -193,3 +193,130 @@ i <- 0
 patience         <- 20
 epoch            <- 300
 validation_split <- 0.20
+
+# OUTER LOOP: iterate lag window sizes
+for (lag_window in lag_grid) {
+  # INNER LOOP: iterate forecast horizons
+  for (h in horizons) {
+    i <- i + 1
+
+    # ---------------------------------------------------------------
+    # Build supervised train set for this (lag_window, h)
+    # ---------------------------------------------------------------
+    train_supervised <- make_supervised(
+      series_values = train_df$y,
+      lag_window = lag_window,
+      forecast_horizon = h
+    )
+
+    X_train <- train_supervised$X
+    y_train <- train_supervised$y
+
+    # Reset graph/session to avoid cross-run state bleed
+    keras3::clear_session()
+    set_random_seed(599 + lag_window * 10 + h)
+
+    # Define a simple MLP:
+    #   input: lag_window features
+    #   hidden: 16-unit ReLU dense layer
+    #   output: 1-unit linear (regression)
+    mlp_model <- keras_model_sequential(layers = list(
+      layer_input(shape = lag_window),
+      layer_dense(units = 16, activation = "relu"),
+      layer_dense(units = 1, activation = "linear")
+    ))
+
+    # Compile with MSE loss and MAE metric (NN-style evaluation)
+    compile(
+      mlp_model,
+      optimizer = optimizer_adam(learning_rate = 0.001),
+      loss = "mse",
+      metrics = "mae"
+    )
+
+    # Early stopping: choose the epoch that minimizes val_loss (internal split)
+    early_stop <- callback_early_stopping(
+      monitor = "val_loss",
+      patience = patience,
+      restore_best_weights = TRUE
+    )
+
+    # Fit the model on TRAIN, using internal validation split for early stopping
+    model_history <- fit(
+      mlp_model,
+      x = X_train,
+      y = y_train,
+      validation_split = validation_split,
+      epochs = epoch,
+      batch_size = 16,
+      shuffle = FALSE,
+      callbacks = list(early_stop),
+      verbose = 2
+    )
+
+    # ---------------------------------------------------------------
+    # Build supervised test set and evaluate once (selected weights)
+    # ---------------------------------------------------------------
+    test_supervised <- make_supervised(
+      series_values = test_df$y,
+      lag_window = lag_window,
+      forecast_horizon = h
+    )
+
+    X_test <- test_supervised$X
+    y_test <- test_supervised$y
+
+    test_metrics <- evaluate(mlp_model, X_test, y_test, verbose = 0)
+
+    # ---------------------------------------------------------------
+    # Store prediction table (scaled + inverse-transformed columns)
+    # ---------------------------------------------------------------
+
+    preds_mlp_list[[i]] <-
+      make_pred_tbl(
+        mlp_model,
+        test_supervised,
+        y_test,
+        test_df$date,
+        lag_window,
+        h,
+        "test",
+        scaler_mu = scaler_mu,
+        scaler_sd = scaler_sd
+      ) %>%
+      select(-split)
+
+    # Identify the epoch with minimum internal validation loss (for reporting)
+    best_epoch <- which.min(model_history$metrics$val_loss)
+
+    # ---------------------------------------------------------------
+    # Raw-scale metrics: compute errors on inverse-transformed log(SVR)
+    # ---------------------------------------------------------------
+
+    test_pred_tbl <- preds_mlp_list[[i]]
+
+    test_mse_raw  <- mean((test_pred_tbl$y_raw - test_pred_tbl$y_hat_raw)^2, na.rm = TRUE)
+    test_rmse_raw <- sqrt(test_mse_raw)
+    test_mae_raw  <- mean(abs(test_pred_tbl$y_raw - test_pred_tbl$y_hat_raw),
+                          na.rm = TRUE)
+
+    # ---------------------------------------------------------------
+    # Store one metrics row for this (lag_window, h)
+    #   - test_* are on the SCALED modeling scale (from evaluate())
+    #   - test_*_raw are on the ORIGINAL log(SVR) scale (inverse-transformed)
+    # ---------------------------------------------------------------
+    results_mlp_list[[i]] <- tibble(
+      lag_window = lag_window,
+      horizon    = h,
+      best_epoch = best_epoch,
+
+      test_mse   = as.numeric(test_metrics[[1]]),
+      test_rmse  = sqrt(as.numeric(test_metrics[[1]])),
+      test_mae   = as.numeric(test_metrics[[2]]),
+
+      test_mse_raw   = test_mse_raw,
+      test_rmse_raw  = test_rmse_raw,
+      test_mae_raw   = test_mae_raw
+    )
+  }
+}
