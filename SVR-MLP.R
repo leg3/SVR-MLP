@@ -51,3 +51,40 @@ log_diagnostic_ratio_series <- log_sentiment_series %>%
   inner_join(log_mean_volatility_series, by = "date") %>%
   select(-value, -mean_value) %>%
   mutate(log_ratio_raw = (log_value_sen - log_value_mnvol))
+
+# Partitioning (monthly obs)
+n_test <- 84   # ~7 years
+
+# Create modeling dataframe (monthly, ordered, no missing y)
+df_all <- log_diagnostic_ratio_series %>%
+  select(date, y = log_ratio_raw) %>%
+  arrange(date) %>%
+  filter(!is.na(y))
+
+# Total number of observations
+n <- nrow(df_all)
+
+# Sanity check: need enough observations to have train + test
+stopifnot(n_test < n)
+
+# Compute global index for the start of the test block
+i_test_start <- n - n_test + 1
+
+# Subset df_all into training and test sets
+train_df <- df_all[1:(i_test_start - 1), ]
+test_df  <- df_all[i_test_start:n, ]
+
+# Fit scaler parameters on TRAIN only (leakage-safe)
+scaler_mu <- mean(train_df$y, na.rm = TRUE)
+scaler_sd <- sd(train_df$y, na.rm = TRUE)
+
+# Sanity check: scaler must be finite and sd must be > 0
+stopifnot(is.finite(scaler_mu), is.finite(scaler_sd), scaler_sd > 0)
+
+# Scale each split using TRAIN mu/sd
+train_y_scaled <- (train_df$y - scaler_mu) / scaler_sd
+test_y_scaled  <- (test_df$y  - scaler_mu) / scaler_sd
+
+# Overwrite y for downstream modeling (all modeling uses scaled y)
+train_df$y <- train_y_scaled
+test_df$y  <- test_y_scaled
